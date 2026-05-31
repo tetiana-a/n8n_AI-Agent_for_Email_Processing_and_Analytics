@@ -1,0 +1,581 @@
+{
+  "name": "AI Customer Support Email Assistant - Safe Drafts + FAQ + Logs",
+  "nodes": [
+    {
+      "id": "7f5b6add-4b66-42d2-9b34-3c90010e6b9c",
+      "name": "README - What this workflow does",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -920,
+        -520
+      ],
+      "parameters": {
+        "color": 4,
+        "width": 760,
+        "height": 320,
+        "content": "# AI Customer Support Email Assistant\n\nPractical production-style workflow for portfolio and real clients.\n\nWhat it does:\n1. Checks Gmail label `Support-Waiting`.\n2. Reads approved FAQ answers from Google Sheets.\n3. AI classifies email and drafts a safe reply using only approved FAQ/templates.\n4. Risky cases go to human review.\n5. Safe cases become Gmail drafts, not direct sends.\n6. Every case is logged to Google Sheets.\n\nUse cases: real estate, clinics, SaaS, e-commerce, travel agencies, legal offices."
+      }
+    },
+    {
+      "id": "0dbd1382-0174-4b6e-929e-c7d10459096b",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -860,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "5d42bb32-f3df-4980-910a-1fc5e7f4b802",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -860,
+        180
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "49751592-1305-4a91-a98c-9f792aa8fd9c",
+      "name": "Gmail - Get Support Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        80
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 10,
+        "filters": {
+          "labelIds": [
+            "Support-Waiting"
+          ],
+          "q": "newer_than:7d"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "Create Gmail labels: Support-Waiting, AI-Draft, Human-Review, Billing, Technical, Sales"
+    },
+    {
+      "id": "c3b9b568-fae1-4ecf-974d-d71912d95e30",
+      "name": "Loop Emails",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -360,
+        80
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "9256cf38-2d18-497d-bf5e-e8fb000e5dfb",
+      "name": "Prepare Email Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        80
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const email = $json;\nconst subject = email.Subject || email.subject || '';\nconst from = email.From || email.from || '';\nconst snippet = email.snippet || '';\nconst body = email.textPlain || email.textHtml || snippet || '';\n\nreturn {\n  json: {\n    email_id: email.id || email.messageId || '',\n    thread_id: email.threadId || '',\n    from,\n    subject,\n    body: String(body).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim(),\n    snippet\n  }\n};"
+      }
+    },
+    {
+      "id": "21f511ea-8f81-46a3-a7fa-0f927905a99d",
+      "name": "Google Sheets - Approved FAQ",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        120,
+        80
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "FAQ"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "FAQ sheet columns: category | question | approved_answer | template_key"
+    },
+    {
+      "id": "131036fa-1b5c-4e61-9d65-98fad0a3197c",
+      "name": "AI - Classify and Draft Safely",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        380,
+        80
+      ],
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "text": "=Incoming email:\nSubject: {{ $('Prepare Email Text').item.json.subject }}\nFrom: {{ $('Prepare Email Text').item.json.from }}\nBody: {{ $('Prepare Email Text').item.json.body }}\n\nApproved FAQ rows from Google Sheets:\n{{ $input.all().map(i => JSON.stringify(i.json)).join('\\n') }}\n\nTask:\nClassify the email and draft a reply. Use ONLY approved FAQ/template information. If no approved answer matches, set requires_human=true and do not invent facts.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a careful customer support AI assistant. Return ONLY valid JSON. Never send an email directly. Create draft text only. If the message contains complaint, legal threat, payment dispute, personal data issue, refund demand, aggressive tone, unclear pricing, or missing information, set requires_human=true. Do not hallucinate. Use approved templates only."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7f8a33aa-f13c-48f9-8d67-204267974ea6",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        300,
+        310
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "id": "f0985075-9f3e-4da9-97d0-a2294a2f24db",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        310
+      ],
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"priority\": {\"type\": \"string\", \"enum\": [\"P1\", \"P2\", \"P3\", \"P4\"]},\n    \"category\": {\"type\": \"string\"},\n    \"intent\": {\"type\": \"string\"},\n    \"sentiment\": {\"type\": \"string\", \"enum\": [\"positive\", \"neutral\", \"negative\"]},\n    \"template_key\": {\"type\": \"string\"},\n    \"draft_subject\": {\"type\": \"string\"},\n    \"draft_body\": {\"type\": \"string\"},\n    \"requires_human\": {\"type\": \"boolean\"},\n    \"reason\": {\"type\": \"string\"}\n  },\n  \"required\": [\"priority\", \"category\", \"intent\", \"sentiment\", \"template_key\", \"draft_subject\", \"draft_body\", \"requires_human\", \"reason\"]\n}"
+      }
+    },
+    {
+      "id": "bfea7b1e-9036-4096-b8ec-5cf0b5022181",
+      "name": "Normalize AI Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        80
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ai = $json.output || $json;\nconst email = $('Prepare Email Text').item.json;\nreturn { json: {\n  email_id: email.email_id,\n  thread_id: email.thread_id,\n  from: email.from,\n  original_subject: email.subject,\n  priority: ai.priority || 'P4',\n  category: ai.category || 'Other',\n  intent: ai.intent || '',\n  sentiment: ai.sentiment || 'neutral',\n  template_key: ai.template_key || '',\n  draft_subject: ai.draft_subject || `Re: ${email.subject}`,\n  draft_body: ai.draft_body || '',\n  requires_human: Boolean(ai.requires_human),\n  reason: ai.reason || '',\n  processed_at: new Date().toISOString()\n}};"
+      }
+    },
+    {
+      "id": "09b98968-8c1d-48ee-8a05-7bde6f6abcd9",
+      "name": "Needs Human Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "47c2a58e-ceff-4c0b-863e-0f80f6a291d7",
+              "leftValue": "={{ $json.requires_human }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3de08b37-4599-4c12-9cf9-66e7ba2d912e",
+      "name": "Gmail - Add Human Review Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1180,
+        -60
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $json.email_id }}",
+        "labelIds": [
+          "Human-Review"
+        ],
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "158a5a4a-b331-4e07-9171-a048ddbbeae0",
+      "name": "Gmail - Create Safe Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1180,
+        210
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $json.email_id }}",
+        "emailType": "text",
+        "message": "={{ $json.draft_body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "This creates a draft/reply depending on your Gmail node version. If your version sends directly, change operation to Create Draft or Draft node."
+    },
+    {
+      "id": "96931720-2730-4283-bda7-e8927dedf6ca",
+      "name": "Gmail - Add AI Draft Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1400,
+        210
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $json.email_id }}",
+        "labelIds": [
+          "AI-Draft"
+        ],
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "06dccc33-b549-4764-b204-6ac63b5887a7",
+      "name": "Google Sheets - Log Result",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1640,
+        80
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Logs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processed_at": "={{ $json.processed_at }}",
+            "email_id": "={{ $json.email_id }}",
+            "from": "={{ $json.from }}",
+            "subject": "={{ $json.original_subject }}",
+            "priority": "={{ $json.priority }}",
+            "category": "={{ $json.category }}",
+            "sentiment": "={{ $json.sentiment }}",
+            "requires_human": "={{ $json.requires_human }}",
+            "reason": "={{ $json.reason }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "5ea418c4-d02b-4245-bc1f-9208bfef53fc",
+      "name": "README - Google Sheets structure",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        20,
+        -520
+      ],
+      "parameters": {
+        "color": 5,
+        "width": 680,
+        "height": 320,
+        "content": "# Google Sheets setup\n\nCreate two tabs:\n\n## FAQ\nColumns:\ncategory | question | approved_answer | template_key\n\nExample:\nBilling | How can I get invoice? | Thank you for your message. We can send the invoice... | billing_invoice\n\n## Logs\nColumns:\nprocessed_at | email_id | from | subject | priority | category | sentiment | requires_human | reason\n\nImportant production rule: AI only drafts responses from approved FAQ/template data. It does not send directly."
+      }
+    }
+  ],
+  "connections": {
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Get Support Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Get Support Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Get Support Emails": {
+      "main": [
+        [
+          {
+            "node": "Loop Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Emails": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Text": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Approved FAQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Approved FAQ": {
+      "main": [
+        [
+          {
+            "node": "AI - Classify and Draft Safely",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Classify and Draft Safely": {
+      "main": [
+        [
+          {
+            "node": "Normalize AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI - Classify and Draft Safely",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI - Classify and Draft Safely",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize AI Output": {
+      "main": [
+        [
+          {
+            "node": "Needs Human Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Human Review?": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Add Human Review Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Create Safe Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Add Human Review Label": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Log Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Create Safe Draft": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Add AI Draft Label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Add AI Draft Label": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Log Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Log Result": {
+      "main": [
+        [
+          {
+            "node": "Loop Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "26ccc79b-455d-493a-89ba-fd719ae2418d",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "portfolio"
+    },
+    {
+      "name": "ai-automation"
+    },
+    {
+      "name": "customer-support"
+    }
+  ]
+}
