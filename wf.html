@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AI Support — Workflow Visualization</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#030305; /* Deep Black */
+  --surface:rgba(15, 17, 23, 0.7);
+  --border:rgba(255, 255, 255, 0.06);
+  --text:#e8eaf0;
+  --muted:#5a6278;
+  --accent:#6366f1;
+  --accent2:#818cf8;
+  --green:#22d3a0;
+  --amber:#f5a623;
+  --pink:#f066c8;
+  --red:#ff5c7c;
+  --teal:#38d4e8;
+  --purple:#a855f7;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;overflow:hidden}
+
+/* ─── BACKGROUND CANVAS (Subtle Dust) ─── */
+#bg-canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.6; /* Very subtle */
+}
+
+/* ─── INFO CARD (Explanation) ─── */
+.info-card {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  width: 320px;
+  background: rgba(12, 12, 15, 0.8);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 20px;
+  z-index: 100;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  transition: opacity 0.3s, transform 0.3s;
+}
+.info-card.hidden {
+  opacity: 0;
+  transform: translateX(20px);
+  pointer-events: none;
+}
+.info-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--accent2);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.info-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  font-weight: 300;
+}
+.info-text strong {
+  color: var(--text);
+  font-weight: 500;
+}
+.info-close {
+  position: absolute;
+  top: 12px; right: 12px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+.info-close:hover { opacity: 1; }
+
+/* ─── HEADER ─── */
+header{
+  position:fixed;top:0;left:0;right:0;height:56px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;
+  background:rgba(3, 3, 5, 0.8);
+  backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--border);
+  z-index:200;gap:16px;
+}
+.logo{
+  font-family:'Syne',sans-serif;font-weight:800;font-size:14px;
+  letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text);white-space:nowrap;
+}
+.logo span{color:var(--accent)}
+.header-tags{display:flex;gap:8px;flex-wrap:wrap;}
+.tag{
+  font-size:9px;font-family:'Syne',sans-serif;font-weight:600;
+  letter-spacing:.06em;padding:4px 10px;border-radius:20px;
+  border:1px solid rgba(255,255,255,0.1);
+  background:transparent;
+  color: var(--muted);
+}
+.header-hint{font-size:10px;color:var(--muted);white-space:nowrap;display:block;}
+
+/* ─── LEGEND ─── */
+.legend{
+  position:fixed;bottom:24px;left:24px;
+  display:flex;flex-direction:column;gap:6px;
+  background:rgba(12, 12, 15, 0.6);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:14px 16px;z-index:200;
+}
+.legend-item{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted)}
+.legend-dot{width:6px;height:6px;border-radius:50%;}
+
+/* ─── CANVAS ─── */
+#viewport{
+  position:fixed;inset:0;padding-top:56px;overflow:hidden;z-index:1;
+  touch-action:none;
+}
+#world{
+  position:absolute;transform-origin:0 0;
+  cursor:grab;user-select:none;
+}
+#world.grabbing{cursor:grabbing}
+svg#edges{position:absolute;top:0;left:0;overflow:visible;pointer-events:none}
+
+/* ─── NODE ─── */
+.node{
+  position:absolute;width:170px;
+  background:rgba(10, 10, 12, 0.75);
+  backdrop-filter: blur(12px);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:0;
+  cursor:pointer;
+  transition:border-color .2s, box-shadow .2s, transform .2s;
+  opacity: 0; 
+  transform: translateY(10px);
+}
+.node.visible {
+  opacity: 1; 
+  transform: translateY(0);
+}
+.node:hover{
+  border-color:rgba(255,255,255,0.15);
+  background: rgba(20, 20, 25, 0.6);
+  transform:translateY(-2px);
+  z-index:10;
+}
+.node.active{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent), 0 0 30px rgba(99, 102, 241, 0.15);
+  z-index:11;
+}
+.node-top{display:flex;align-items:center;gap:10px;padding:12px 14px 10px}
+.node-icon{
+  width:28px;height:28px;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;flex-shrink:0;
+}
+.node-label{flex:1;min-width:0}
+.node-name{
+  font-family:'Syne',sans-serif;font-weight:700;font-size:11px;
+  color:var(--text);line-height:1.3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.node-type{font-size:9px;color:var(--muted);margin-top:2px;font-weight:300;}
+.node-bar{height:2px;border-radius:0 0 12px 12px; opacity: 0.5;}
+
+/* Icon Colors */
+.ic-trigger{background:rgba(34,211,160,.1);color:var(--green);border:1px solid rgba(34,211,160,.2)}
+.bar-trigger{background:var(--green)}
+.ic-gmail{background:rgba(255,92,124,.1);color:var(--red);border:1px solid rgba(255,92,124,.2)}
+.bar-gmail{background:var(--red)}
+.ic-sheets{background:rgba(56,212,232,.1);color:var(--teal);border:1px solid rgba(56,212,232,.2)}
+.bar-sheets{background:var(--teal)}
+.ic-code{background:rgba(245,166,35,.1);color:var(--amber);border:1px solid rgba(245,166,35,.2)}
+.bar-code{background:var(--amber)}
+.ic-logic{background:rgba(168,85,247,.1);color:var(--purple);border:1px solid rgba(168,85,247,.2)}
+.bar-logic{background:var(--purple)}
+.ic-ai{background:rgba(240,102,200,.1);color:var(--pink);border:1px solid rgba(240,102,200,.2)}
+.bar-ai{background:var(--pink)}
+
+/* ─── EDGE ─── */
+.edge{fill:none;stroke:rgba(255,255,255,0.08);stroke-width:1.5}
+.edge-ai{stroke-dasharray:6 4}
+.edge.hl{stroke:var(--accent);filter: drop-shadow(0 0 4px var(--accent));}
+.edge-flow {
+  fill: none; stroke-width: 2;
+  stroke-dasharray: 10 300; 
+  stroke: rgba(255,255,255,0.2);
+  animation: flow 5s linear infinite;
+}
+.edge-flow.hl { stroke: var(--accent); opacity: 0.8; }
+@keyframes flow { to { stroke-dashoffset: -320; } }
+
+/* ─── PANEL ─── */
+#panel{
+  position:fixed;top:56px;right:0;bottom:0;width:380px;
+  background:rgba(5, 5, 8, 0.95);
+  backdrop-filter: blur(24px);
+  border-left:1px solid var(--border);
+  transform:translateX(100%);
+  transition:transform .35s cubic-bezier(.4,0,.2,1);
+  z-index:150;overflow-y:auto;
+}
+#panel.open{transform:translateX(0)}
+.panel-head{padding:24px;border-bottom:1px solid var(--border)}
+.panel-close{
+  position:absolute;top:18px;right:20px;
+  background:rgba(255,255,255,0.05);border:none;
+  color:var(--muted);border-radius:8px;
+  width:30px;height:30px;cursor:pointer;font-size:14px;
+}
+.panel-title{font-family:'Syne',sans-serif;font-weight:800;font-size:16px;color:var(--text);padding-right:40px}
+.panel-sub{font-size:11px;color:var(--muted);margin-top:6px}
+.panel-body{padding:20px;display:flex;flex-direction:column;gap:16px}
+.sect-lbl{
+  font-family:'Syne',sans-serif;font-weight:700;
+  font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:8px;
+}
+.code-block{
+  background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:8px;
+  padding:12px;font-size:10px;line-height:1.6;color:#a5b4fc;
+  white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;
+}
+.note-box{
+  background:rgba(99, 102, 241, 0.05);border:1px solid rgba(99, 102, 241, 0.15);
+  border-radius:8px;padding:12px;font-size:11px;color:#c7d2fe;line-height:1.6
+}
+.param-row{
+  display:flex;justify-content:space-between;
+  padding:6px 0;border-bottom:1px solid var(--border);font-size:10px;
+}
+.param-key{color:var(--muted)}
+.param-val{color:var(--text);font-weight:500;text-align:right;word-break:break-all;}
+
+/* ─── CONTROLS ─── */
+.zoom-btns{
+  position:fixed;bottom:24px;right:24px;
+  display:flex;flex-direction:column;gap:6px;z-index:200
+}
+.zoom-btn{
+  width:36px;height:36px;background:rgba(10, 10, 12, 0.6);
+  border:1px solid var(--border);
+  color:var(--text);font-size:16px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  border-radius: 10px;
+}
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 900px) {
+  .info-card { display: none; } /* Hide info card on small screens */
+  #panel { width: 100%; }
+}
+@media (max-width: 600px) {
+  .header-tags { display: none; }
+  #panel { top: auto; bottom: 0; height: 70vh; border-radius: 20px 20px 0 0; transform: translateY(100%); }
+  .legend { opacity: 0.4; }
+  .node { width: 140px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Background Canvas -->
+<canvas id="bg-canvas"></canvas>
+
+<!-- Info Card (English Explanation) -->
+<div class="info-card" id="infoCard">
+  <button class="info-close" onclick="document.getElementById('infoCard').classList.add('hidden')">×</button>
+  <div class="info-title">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+    Workflow Overview
+  </div>
+  <div class="info-text">
+    This automated system handles customer support emails:
+    <br><br>
+    1. <strong>Fetch</strong>: Checks Gmail for new tickets every 15 minutes.<br>
+    2. <strong>Context</strong>: Loads approved answers from Google Sheets.<br>
+    3. <strong>AI Analysis</strong>: GPT-4o classifies intent and drafts a safe reply.<br>
+    4. <strong>Safety</strong>: Complex cases are flagged for humans; safe ones become drafts.
+    <br><br>
+    <i>Click any node to see details.</i>
+  </div>
+</div>
+
+<header>
+  <div class="logo">AI<span>Flow</span> System</div>
+  <div class="header-tags">
+    <span class="tag">n8n Automation</span>
+    <span class="tag">OpenAI GPT-4o</span>
+  </div>
+  <span class="header-hint">Drag to pan · Scroll to zoom</span>
+</header>
+
+<div id="viewport">
+  <div id="world">
+    <svg id="edges"></svg>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>Trigger</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>Gmail</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--teal)"></div>Sheets</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--pink)"></div>AI / Logic</div>
+</div>
+
+<div class="zoom-btns">
+  <button class="zoom-btn" onclick="zoom(1.3)">+</button>
+  <button class="zoom-btn" onclick="zoom(0.7)">−</button>
+  <button class="zoom-btn" onclick="fitView()" style="font-size:10px;font-family:'Syne'">FIT</button>
+</div>
+
+<div id="panel">
+  <div class="panel-head">
+    <button class="panel-close" onclick="closePanel()">✕</button>
+    <div class="panel-title" id="p-title"></div>
+    <div class="panel-sub" id="p-sub"></div>
+  </div>
+  <div class="panel-body" id="p-body"></div>
+</div>
+
+<script>
+// ── 1. SUBTLE WHITE PARTICLES ───────────────────────────────────
+const canvas = document.getElementById('bg-canvas');
+const ctx = canvas.getContext('2d');
+let w, h, particles;
+const particleCount = 40; 
+
+function initCanvas() {
+  w = canvas.width = window.innerWidth;
+  h = canvas.height = window.innerHeight;
+  particles = [];
+  
+  for (let i = 0; i < particleCount; i++) {
+    particles.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.2, // Very slow
+      vy: (Math.random() - 0.5) * 0.2,
+      size: Math.random() * 1.5 + 0.5, // Small
+      alpha: Math.random() * 0.3 + 0.1 // Very faint (0.1 to 0.4)
+    });
+  }
+}
+
+function animateCanvas() {
+  ctx.clearRect(0, 0, w, h);
+  
+  for (let i = 0; i < particles.length; i++) {
+    let p = particles[i];
+    
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Wrap around edges
+    if (p.x < 0) p.x = w;
+    if (p.x > w) p.x = 0;
+    if (p.y < 0) p.y = h;
+    if (p.y > h) p.y = 0;
+
+    // Draw particle
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`; // Pure white, low alpha
+    ctx.fill();
+    
+    // Optional: Draw faint connections
+    for (let j = i + 1; j < particles.length; j++) {
+      let p2 = particles[j];
+      let dist = Math.hypot(p.x - p2.x, p.y - p2.y);
+      if (dist < 80) {
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.02 * (1 - dist / 80)})`; // Extremely faint line
+        ctx.stroke();
+      }
+    }
+  }
+  requestAnimationFrame(animateCanvas);
+}
+
+window.addEventListener('resize', initCanvas);
+
+// ── 2. WORKFLOW DATA ───────────────────────────────────────────
+const NW=168, NH=62;
+
+const NODES = [
+  {id:'manual', name:'Manual Trigger', type:'manualTrigger', sub:'Test run', ic:'ic-trigger', bar:'bar-trigger', icon:'▶', x:0,   y:120},
+  {id:'sched',  name:'Every 15 Min',   type:'scheduleTrigger', sub:'Schedule', ic:'ic-trigger', bar:'bar-trigger', icon:'⏱', x:0,   y:240},
+  {id:'gmail1', name:'Get Support Emails', type:'gmail', sub:'Gmail · getAll', ic:'ic-gmail', bar:'bar-gmail', icon:'✉', x:240, y:180},
+  {id:'loop',   name:'Loop Emails',    type:'splitInBatches', sub:'Iterator', ic:'ic-logic', bar:'bar-logic', icon:'↻', x:460, y:180},
+  {id:'prep',   name:'Prepare Email Text', type:'code', sub:'Clean body', ic:'ic-code', bar:'bar-code', icon:'{ }', x:680, y:180},
+  {id:'faq',    name:'Approved FAQ',   type:'googleSheets', sub:'Sheets · FAQ', ic:'ic-sheets', bar:'bar-sheets', icon:'⊞', x:900, y:180},
+  {id:'ai',     name:'AI Classify', type:'chainLlm', sub:'LLM Chain', ic:'ic-ai', bar:'bar-ai', icon:'◈', x:1120, y:180},
+  {id:'openai', name:'OpenAI Model', type:'lmChatOpenAi', sub:'GPT-4o-mini', ic:'ic-ai', bar:'bar-ai', icon:'✦', x:1000, y:360},
+  {id:'parser', name:'JSON Parser', type:'outputParserStructured', sub:'Schema', ic:'ic-ai', bar:'bar-ai', icon:'⟨/⟩', x:1200, y:360},
+  {id:'norm',   name:'Normalize Output', type:'code', sub:'Merge data', ic:'ic-code', bar:'bar-code', icon:'{ }', x:1340, y:180},
+  {id:'if',     name:'Needs Human?', type:'if', sub:'Branch logic', ic:'ic-logic', bar:'bar-logic', icon:'⑂', x:1560, y:180},
+  {id:'lhr',    name:'Label: Human', type:'gmail', sub:'Gmail · Label', ic:'ic-gmail', bar:'bar-gmail', icon:'⚠', x:1780, y:60},
+  {id:'draft',  name:'Create Draft', type:'gmail', sub:'Gmail · Draft', ic:'ic-gmail', bar:'bar-gmail', icon:'✉', x:1780, y:300},
+  {id:'lai',    name:'Label: AI', type:'gmail', sub:'Gmail · Label', ic:'ic-gmail', bar:'bar-gmail', icon:'✓', x:2000, y:300},
+  {id:'log',    name:'Log to Sheets',   type:'googleSheets', sub:'Sheets · Log', ic:'ic-sheets', bar:'bar-sheets', icon:'⊞', x:2220, y:180},
+];
+
+const EDGES = [
+  {s:'manual', t:'gmail1'},
+  {s:'sched',  t:'gmail1'},
+  {s:'gmail1', t:'loop'},
+  {s:'loop',   t:'prep'},
+  {s:'prep',   t:'faq'},
+  {s:'faq',    t:'ai'},
+  {s:'openai', t:'ai', ai:true},
+  {s:'parser', t:'ai', ai:true},
+  {s:'ai',     t:'norm'},
+  {s:'norm',   t:'if'},
+  {s:'if',     t:'lhr'},
+  {s:'if',     t:'draft'},
+  {s:'lhr',    t:'log'},
+  {s:'draft',  t:'lai'},
+  {s:'lai',    t:'log'},
+  {s:'log',    t:'loop', back:true},
+];
+
+const DETAILS = {
+  manual:{title:'Manual Trigger',typeLabel:'Start Node',note:'Allows starting the workflow manually for testing purposes.',params:[]},
+  sched:{title:'Schedule Trigger',typeLabel:'Cron Job',note:'Runs automatically every 15 minutes.',params:[{k:'Interval',v:'15 min'}]},
+  gmail1:{title:'Get Support Emails',typeLabel:'Gmail Action',note:'Fetches up to 10 unread emails labeled "Support-Waiting".',params:[{k:'Limit',v:'10'}]},
+  loop:{title:'Loop Emails',typeLabel:'Split In Batches',note:'Processes the list of emails one by one.',params:[]},
+  prep:{title:'Prepare Email Text',typeLabel:'Code Node',note:'Extracts plain text from HTML emails.',code:`// Extraction Logic\nconst text = html\n  .replace(/<[^>]*>/g, ' ')\n  .trim();\nreturn { text };`},
+  faq:{title:'Approved FAQ',typeLabel:'Google Sheets',note:'Reads pre-approved answers to ensure the AI does not hallucinate.',params:[{k:'Sheet',v:'FAQ'}]},
+  ai:{title:'AI Brain',typeLabel:'LangChain',note:'Analyzes sentiment and drafts a reply using the approved context.',system:'You are a helpful support assistant. Use only the provided context.'},
+  openai:{title:'OpenAI Model',typeLabel:'LLM',note:'GPT-4o-mini ensures high quality reasoning at low cost.',params:[{k:'Temp',v:'0.2'}]},
+  parser:{title:'Output Parser',typeLabel:'Structure',note:'Ensures the AI returns valid JSON data.',schema:'{ sentiment, draft_body }'},
+  norm:{title:'Normalize',typeLabel:'Code Node',note:'Formats the final JSON object.',code:'return { json: item };'},
+  if:{title:'Check Human',typeLabel:'IF Condition',note:'Checks if the AI flagged the email as requiring human review.',params:[]},
+  lhr:{title:'Label: Human',typeLabel:'Gmail',note:'Marks email for human intervention.',params:[]},
+  draft:{title:'Create Draft',typeLabel:'Gmail',note:'Prepares a reply draft in Gmail.',params:[]},
+  lai:{title:'Label: AI',typeLabel:'Gmail',note:'Marks email as processed by AI.',params:[]},
+  log:{title:'Log Result',typeLabel:'Sheets',note:'Saves a log of the processed email.',params:[]},
+};
+
+// ── 3. INTERACTION LOGIC ───────────────────────────────────────
+const world = document.getElementById('world');
+const svg   = document.getElementById('edges');
+let scale=1, ox=40, oy=80;
+let dragging=false, lastX=0, lastY=0;
+
+function applyTransform(){ world.style.transform=`translate(${ox}px,${oy}px) scale(${scale})`; }
+
+const viewport = document.getElementById('viewport');
+
+viewport.addEventListener('pointerdown', e => {
+  if(e.target.closest('.node') || e.target.closest('#panel') || e.target.closest('.info-card')) return;
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  world.classList.add('grabbing');
+  viewport.setPointerCapture(e.pointerId);
+});
+
+viewport.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  ox += e.clientX - lastX; oy += e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  applyTransform();
+});
+
+viewport.addEventListener('pointerup', e => {
+  dragging = false; world.classList.remove('grabbing');
+  viewport.releasePointerCapture(e.pointerId);
+});
+
+viewport.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  const rect = viewport.getBoundingClientRect();
+  const mx = e.clientX - rect.left; const my = e.clientY - rect.top;
+  ox = mx - (mx - ox) * delta; oy = my - (my - oy) * delta;
+  scale *= delta; scale = Math.min(Math.max(scale, 0.2), 3);
+  applyTransform();
+}, { passive: false });
+
+function zoom(f) {
+  const rect = viewport.getBoundingClientRect();
+  ox = rect.width/2 - (rect.width/2 - ox) * f; 
+  oy = rect.height/2 - (rect.height/2 - oy) * f;
+  scale *= f; scale = Math.min(Math.max(scale, 0.2), 3);
+  applyTransform();
+}
+
+function fitView() {
+  if(NODES.length === 0) return;
+  const xs = NODES.map(n => n.x); const ys = NODES.map(n => n.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs) + NW;
+  const minY = Math.min(...ys), maxY = Math.max(...ys) + NH;
+  const rect = viewport.getBoundingClientRect(); const vw = rect.width, vh = rect.height; const pad = 80;
+  const sf = Math.min((vw - pad * 2) / (maxX - minX), (vh - pad * 2) / (maxY - minY));
+  scale = Math.min(sf, 1);
+  const cw = (maxX - minX) * scale; const ch = (maxY - minY) * scale;
+  ox = (vw - cw) / 2 - minX * scale; oy = (vh - ch) / 2 - minY * scale;
+  applyTransform();
+}
+
+// ── 4. INITIALIZATION ───────────────────────────────────────────
+function buildUI() {
+  NODES.forEach((n, i) => {
+    const el = document.createElement('div');
+    el.className = 'node';
+    el.id = 'n-' + n.id;
+    el.style.cssText = `left:${n.x}px;top:${n.y}px;`;
+    el.innerHTML = `
+      <div class="node-top">
+        <div class="node-icon ${n.ic}">${n.icon}</div>
+        <div class="node-label">
+          <div class="node-name">${n.name}</div>
+          <div class="node-type">${n.sub}</div>
+        </div>
+      </div>
+      <div class="node-bar ${n.bar}"></div>`;
+    
+    el.addEventListener('click', e => { e.stopPropagation(); openPanel(n.id); });
+    world.appendChild(el);
+    setTimeout(() => el.classList.add('visible'), 50 + i * 40);
+  });
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = `<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M2 1L8 5L2 9" fill="rgba(255,255,255,0.2)"/></marker>`;
+  svg.appendChild(defs);
+
+  EDGES.forEach(e => {
+    const s = NODES.find(n => n.id === e.s);
+    const t = NODES.find(n => n.id === e.t);
+    if (!s || !t) return;
+
+    const x1 = s.x + NW, y1 = s.y + NH / 2;
+    const x2 = t.x,    y2 = t.y + NH / 2;
+    let d;
+    
+    if (e.ai) {
+      const mx = (x1 + x2) / 2;
+      d = `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
+    } else if (e.back) {
+      const my = Math.max(s.y, t.y) + NH + 60;
+      d = `M${s.x + NW/2} ${s.y + NH} Q${(s.x + t.x + NW)/2} ${my} ${t.x + NW/2} ${t.y + NH}`;
+    } else {
+      const mx = (x1 + x2) / 2;
+      d = `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
+    }
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('class', 'edge' + (e.ai ? ' edge-ai' : ''));
+    path.setAttribute('marker-end', 'url(#arr)');
+    path.dataset.s = e.s; path.dataset.t = e.t;
+    svg.appendChild(path);
+
+    const flowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    flowPath.setAttribute('d', d);
+    flowPath.setAttribute('class', 'edge-flow');
+    flowPath.dataset.s = e.s; flowPath.dataset.t = e.t;
+    svg.appendChild(flowPath);
+  });
+}
+
+let activeId = null;
+function openPanel(id) {
+  if (activeId) document.getElementById('n-' + activeId)?.classList.remove('active');
+  activeId = id;
+  document.getElementById('n-' + id)?.classList.add('active');
+  svg.querySelectorAll('.edge, .edge-flow').forEach(p => {
+    p.classList.toggle('hl', p.dataset.s === id || p.dataset.t === id);
+  });
+  
+  // Hide info card when node is selected
+  document.getElementById('infoCard').classList.add('hidden');
+
+  const d = DETAILS[id];
+  if (!d) return;
+  document.getElementById('p-title').textContent = d.title;
+  document.getElementById('p-sub').textContent = d.typeLabel;
+  let html = '';
+  if (d.note) html += `<div><div class="sect-lbl">Description</div><div class="note-box">${d.note}</div></div>`;
+  if (d.params && d.params.length) {
+    html += `<div><div class="sect-lbl">Config</div><div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:4px 12px">`;
+    d.params.forEach(p => html += `<div class="param-row"><span class="param-key">${p.k}</span><span class="param-val">${p.v}</span></div>`);
+    html += `</div></div>`;
+  }
+  if (d.code) html += `<div><div class="sect-lbl">Code</div><pre class="code-block">${esc(d.code)}</pre></div>`;
+  if (d.system) html += `<div><div class="sect-lbl">System Prompt</div><pre class="code-block">${esc(d.system)}</pre></div>`;
+  if (d.schema) html += `<div><div class="sect-lbl">Schema</div><pre class="code-block">${esc(d.schema)}</pre></div>`;
+  document.getElementById('p-body').innerHTML = html;
+  document.getElementById('panel').classList.add('open');
+}
+
+function closePanel() {
+  document.getElementById('panel').classList.remove('open');
+  if (activeId) { document.getElementById('n-' + activeId)?.classList.remove('active'); activeId = null; }
+  svg.querySelectorAll('.hl').forEach(p => p.classList.remove('hl'));
+}
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+viewport.addEventListener('click', e => { if (!e.target.closest('.node') && !e.target.closest('#panel')) closePanel(); });
+
+// Start
+window.addEventListener('load', () => {
+  initCanvas();
+  animateCanvas();
+  buildUI();
+  setTimeout(fitView, 100);
+});
+</script>
+</body>
+</html>
